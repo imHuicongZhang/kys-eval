@@ -1,0 +1,111 @@
+diff --git a/src/lighteval/metrics/metrics.py b/src/lighteval/metrics/metrics.py
+index 82cfbb7..bcade70 100644
+--- a/src/lighteval/metrics/metrics.py
++++ b/src/lighteval/metrics/metrics.py
+@@ -56,8 +56,14 @@ from lighteval.metrics.metrics_sample import (
+     PassAtK,
+     Recall,
+     StringDistance,
++    LogProbTokenNorm,
++)
++from lighteval.metrics.normalizations import (
++    LogProbCharNorm,
++    bigbench_normalizer,
++    remove_braces,
++    remove_braces_and_strip,
+ )
+-from lighteval.metrics.normalizations import bigbench_normalizer, remove_braces, remove_braces_and_strip
+ from lighteval.metrics.sample_preparator import (
+     GenerativePreparator,
+     LoglikelihoodPreparator,
+@@ -424,6 +430,20 @@ class Metrics(Enum):
+         corpus_level_fn=np.mean,
+         higher_is_better=True,
+     )
++    loglikelihood_acc_norm = SampleLevelMetric(
++        metric_name="acc_norm",
++        sample_level_fn=LoglikelihoodAcc(logprob_normalization=LogProbTokenNorm()),
++        category=SamplingMethod.LOGPROBS,
++        corpus_level_fn=np.mean,
++        higher_is_better=True,
++    )
++    loglikelihood_acc_norm_nospace = SampleLevelMetric(
++        metric_name="acc_norm_nospace",
++        sample_level_fn=LoglikelihoodAcc(logprob_normalization=LogProbCharNorm(ignore_first_space=True)),
++        category=SamplingMethod.LOGPROBS,
++        corpus_level_fn=np.mean,
++        higher_is_better=True,
++    )
+     loglikelihood_f1 = CorpusLevelMetric(
+         metric_name="loglikelihood_f1",
+         sample_level_fn=LoglikelihoodPreparator(),
+diff --git a/src/lighteval/metrics/normalizations.py b/src/lighteval/metrics/normalizations.py
+index ef55681..91b0ca0 100644
+--- a/src/lighteval/metrics/normalizations.py
++++ b/src/lighteval/metrics/normalizations.py
+@@ -523,8 +523,13 @@ def normalize_log_probs(
+             normalized_log_probs = [choices_logprob[ix] / len(choice) for ix, choice in enumerate(choices_text)]
+         case LogProbTokenNorm():
+             assert choices_tokens is not None, "choices_tokens must be provided for token normalization"
++            # choices_tokens may be a padded tensor (padding value = -1), so count only real tokens
++            # normalized_log_probs = [
++            #     choices_logprob[ix] / len(choices_tokens[ix]) for ix in range(len(choices_logprob))
++            # ]
+             normalized_log_probs = [
+-                choices_logprob[ix] / len(choices_tokens[ix]) for ix in range(len(choices_logprob))
++                choices_logprob[ix] / sum(1 for t in choices_tokens[ix] if int(t) != -1)
++                for ix in range(len(choices_logprob))
+             ]
+         case LogProbPMINorm():
+             assert unconditioned_logprob is not None, "unconditioned_logprob must be provided for PMI normalization"
+diff --git a/src/lighteval/models/transformers/transformers_model.py b/src/lighteval/models/transformers/transformers_model.py
+index 3c19e65..f02e3a5 100644
+--- a/src/lighteval/models/transformers/transformers_model.py
++++ b/src/lighteval/models/transformers/transformers_model.py
+@@ -235,7 +235,9 @@ class TransformersModel(LightevalModel):
+         )
+ 
+         # Initialize cache for tokenization and predictions
+-        self._cache = SampleCache(config)
++        # (LIGHTEVAL_NO_CACHE=1 disables the sample cache, which round-trips results
++        # through parquet and mangles 2D output_tokens used by token-norm acc_norm)
++        self._cache = None if os.environ.get("LIGHTEVAL_NO_CACHE") == "1" else SampleCache(config)
+ 
+     def cleanup(self):
+         """Clean up operations if needed, such as closing an endpoint."""
+@@ -299,7 +301,11 @@ class TransformersModel(LightevalModel):
+         )
+ 
+         # Initialize cache for tokenization and predictions
+-        self._cache = SampleCache(config) if config else None
++        self._cache = (
++            None
++            if (config is None or os.environ.get("LIGHTEVAL_NO_CACHE") == "1")
++            else SampleCache(config)
++        )
+ 
+         return self
+ 
+@@ -1108,7 +1114,7 @@ class TransformersModel(LightevalModel):
+                         # 2d on num choices and max len
+                         len_choice = gathered_len_choices[i]
+                         batch_tokenized_continuations_processed.append(
+-                            gathered_continuations[i][:num_choices][:len_choice]
++                            gathered_continuations[i][:num_choices, :len_choice]
+                         )
+                         # 1d on max len context
+                         len_context = gathered_len_context[i]
+diff --git a/src/lighteval/pipeline.py b/src/lighteval/pipeline.py
+index 1f5da9c..72d6e93 100644
+--- a/src/lighteval/pipeline.py
++++ b/src/lighteval/pipeline.py
+@@ -145,7 +145,8 @@ class Pipeline:
+         self.accelerator, self.parallel_context = self._init_parallelism_manager()
+         self.model = self._init_model(model_config, model)
+         # Must occur after model and task init
+-        self.model._cache._init_registry(self.registry)
++        if getattr(self.model, "_cache", None) is not None:
++            self.model._cache._init_registry(self.registry)
+         # Must occur after model init
+         self._init_accelerator_seeds()
+ 

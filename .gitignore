@@ -1,0 +1,52 @@
+# evaluation outputs and caches
+results/
+reports/*.md
+reports/*.csv
+lighteval_raw/
+*.parquet
+results_*.json
+details_*.json
+
+# model and dataset downloads
+model_cache/
+hf_cache/
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# third-party checkout created by the installer, virtualenvs
+third_party/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# logs
+logs/
+*.log
+*.out
+*.err
+slurm-*.out
+
+# credentials
+.env
+.env.*
+.netrc
+.git-credentials
+.huggingface/
+token
+*token*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+hosts.yml
+
+# editors / OS
+.claude/
+.vscode/
+.idea/
+.DS_Store
