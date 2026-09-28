@@ -5,7 +5,7 @@ order, so `--list` with the same filters shows the indices a SLURM array should 
 
   python -m kys_eval.run_grid --list --check-hub          # show cells, their status, and hub availability
   python -m kys_eval.run_grid                             # evaluate every pending cell, one after another
-  python -m kys_eval.run_grid --seeds 42                  # one seed (12 cells)
+  python -m kys_eval.run_grid --seeds 42                  # one seed (21 cells)
   python -m kys_eval.run_grid --index 7                   # one cell (for SLURM arrays)
 
 Results go to <results-root>/raw_selected/seed<S>/<setting>/ep<N>/{results.json,summary.md}.

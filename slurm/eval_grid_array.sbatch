@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=<TIME>
-#SBATCH --array=0-35%8
+#SBATCH --array=0-62%8
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 #
@@ -20,9 +20,9 @@
 #
 # Submit from the repository root (logs/ is relative to it):
 #   mkdir -p logs
-#   sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch                  # whole grid, 36 tasks
-#   sbatch --array=0-11 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="--seeds 42" \
-#          slurm/eval_grid_array.sbatch                                                 # one seed, 12 tasks
+#   sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch                  # whole grid, 63 tasks
+#   sbatch --array=0-20 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="--seeds 42" \
+#          slurm/eval_grid_array.sbatch                                                 # one seed, 21 tasks
 # The --array range must match `python -m kys_eval.run_grid --list <same KYS_GRID_ARGS>`.
 # Finished checkpoints are skipped, so resubmitting the same array is safe.
 set -euo pipefail

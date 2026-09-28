@@ -8,10 +8,12 @@ results in reference/rewritten_v2_54_per_task.csv, and writes into --out-dir:
   raw_selected_report.md           summary table of average accuracy (Mean6), then one table per
                                    benchmark: rows = setting, columns = ep1/ep2/ep3,
                                    cells = mean ± std over seeds
-  raw_vs_rewritten.md              each raw setting next to its rewritten counterpart, with deltas
+  raw_vs_rewritten.md              each raw setting next to its v2 comparator, with deltas: the rewritten
+                                   counterpart for the four strategy-linked controls, the fastText
+                                   quality_base arm for the three global Top-10B selections
   raw_selected_per_checkpoint.csv  one row per evaluated checkpoint
   raw_selected_by_epoch.csv        setting x epoch x benchmark: mean, std, n, seeds
-  raw_vs_rewritten.csv             pair x epoch x benchmark: raw and rewritten stats, paired delta
+  raw_vs_rewritten.csv             pair x epoch x benchmark: raw and comparator stats, paired delta
 """
 
 import argparse
@@ -147,7 +149,8 @@ def write_raw_report(raw, problems, results_root, out_dir):
     with open(out_dir / "raw_selected_per_checkpoint.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["setting", "seed", "epoch", "step"] + [k for k, _ in ALL_BENCHMARKS] + ["gpu"])
-        for (setting, seed, epoch), cell in sorted(raw.items(), key=lambda kv: (kv[0][1], C.RAW_SETTINGS.index(kv[0][0]), kv[0][2])):
+        order = {s: i for i, s in enumerate(C.RAW_SETTINGS)}
+        for (setting, seed, epoch), cell in sorted(raw.items(), key=lambda kv: (kv[0][1], order.get(kv[0][0], len(order)), kv[0][0], kv[0][2])):
             writer.writerow([setting, seed, epoch, cell["step"]] + [f"{cell[k]:.6f}" for k, _ in ALL_BENCHMARKS] + [cell["gpu"]])
 
     with open(out_dir / "raw_selected_by_epoch.csv", "w", newline="") as f:
@@ -166,27 +169,30 @@ def write_raw_report(raw, problems, results_root, out_dir):
 
 def write_pair_report(raw, rewritten, out_dir):
     lines = [
-        "# Raw-selected vs rewritten (v2)", "",
-        "Each raw-selected setting next to its rewritten counterpart, per epoch. Raw and rewritten columns are "
-        "`acc_norm` in percent, mean ± std over seeds.", "",
-        "**Δ = rewritten − raw**, in accuracy points: positive means the rewritten arm scores higher than its "
-        "raw-selected control. Δ is the mean of the per-seed differences (the two arms share each seed's "
-        "initialization), ± the standard deviation of those differences; *Seeds Δ>0* counts seeds with a "
-        "positive difference.", "",
-        "Rewritten side: the v2 evaluation of the 54 rewritten checkpoints (`reference/rewritten_v2_54_per_task.csv`, "
+        "# Raw-selected vs v2 comparators", "",
+        "Each raw-selected setting next to its v2 comparator, per epoch. Columns are `acc_norm` in percent, "
+        "mean ± std over seeds.", "",
+        "Two kinds of pairs. The four **strategy-linked** controls are compared with their rewritten counterpart. "
+        "The three **global Top-10B** selections are compared with the existing fastText Quality-Base arm: that "
+        "is a comparison between selection scores on raw data, not a rewriting comparison.", "",
+        "**Δ = comparator − raw**, in accuracy points: positive means the comparator scores higher. Δ is the mean "
+        "of the per-seed differences (the two arms share each seed's initialization), ± the standard deviation of "
+        "those differences; *Seeds Δ>0* counts seeds with a positive difference.", "",
+        "Comparator side: the v2 evaluation of the 54 rewritten-grid checkpoints (`reference/rewritten_v2_54_per_task.csv`, "
         f"all scored on {C.REFERENCE_GPU}). These are not the paper's printed table values.", "",
-        "| Raw-selected | Rewritten counterpart |", "|---|---|",
+        "| Raw-selected | Kind | Comparator |", "|---|---|---|",
     ]
-    lines += [f"| `{r}` | {C.PAPER_LABEL[w]} (`{w}`) |" for r, w in C.RAW_TO_REWRITTEN.items()] + [""]
+    lines += [f"| `{r}` | {'strategy-linked' if r in C.RAW_TO_REWRITTEN else 'global Top-10B'} | {C.PAPER_LABEL[w]} (`{w}`) |"
+              for r, w in C.RAW_COMPARATOR.items()] + [""]
     lines += gpu_notes(raw)
 
     rows = []
     sections = [("mean6", "Mean6 (commonsense average)"), ("mmlu", "MMLU (57-subject macro-average)")]
     sections += COMMONSENSE_BENCHMARKS + CATEGORY_BENCHMARKS
     for key, label in sections:
-        lines += [f"## {label}", "", "| Raw setting | Rewritten | Epoch | Raw | Rewritten | Δ (rewritten − raw) | Seeds Δ>0 |",
+        lines += [f"## {label}", "", "| Raw setting | Comparator | Epoch | Raw | Comparator | Δ (comparator − raw) | Seeds Δ>0 |",
                   "|---|---|---|---|---|---|---|"]
-        for raw_setting, rewritten_setting in C.RAW_TO_REWRITTEN.items():
+        for raw_setting, rewritten_setting in C.RAW_COMPARATOR.items():
             for epoch in C.EPOCHS:
                 rv = seed_values(raw, raw_setting, epoch, key)
                 wv = seed_values(rewritten, rewritten_setting, epoch, key)
@@ -212,6 +218,7 @@ def write_pair_report(raw, rewritten, out_dir):
 
     with open(out_dir / "raw_vs_rewritten.csv", "w", newline="") as f:
         writer = csv.writer(f)
+        # column names kept from the four-setting version; "rewritten_*" = the comparator arm
         writer.writerow(["raw_setting", "rewritten_setting", "epoch", "benchmark",
                          "raw_mean", "raw_std", "raw_n", "rewritten_mean", "rewritten_std", "rewritten_n",
                          "delta_mean", "delta_std", "n_paired", "n_delta_positive", "paired_seeds"])

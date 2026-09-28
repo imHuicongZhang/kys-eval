@@ -2,7 +2,7 @@
 
   python -m kys_eval.selftest
 
-1. model spec parsing and the 36-cell grid
+1. model spec parsing and the 63-cell grid
 2. aggregation: builds a synthetic raw-selected results tree in which every raw cell carries the
    scores of its rewritten counterpart, runs kys_eval.aggregate, and asserts that every delta is 0 and
    that the per-epoch Mean6/MMLU means reproduce the v2 tables in reference/
@@ -48,9 +48,10 @@ def test_specs_and_grid():
     assert common.parse_model_spec("hf://org/repo")["subfolder"] == ""
     assert common.parse_model_spec("/tmp/x")["kind"] == "local"
     cells = C.grid_cells()
-    assert len(cells) == 36 and len({c["hf_subfolder"] for c in cells}) == 36
+    n = len(C.RAW_SETTINGS) * len(C.SEEDS) * len(C.EPOCHS)
+    assert n == 63 and len(cells) == n and len({c["hf_subfolder"] for c in cells}) == n
     assert cells[0]["hf_subfolder"] == "rewrite-1p5b/seed42/raw_diversity_oriented/ep1/hf"
-    assert len(selected_cells([43], C.RAW_SETTINGS, C.EPOCHS)) == 12
+    assert len(selected_cells([43], C.RAW_SETTINGS, C.EPOCHS)) == len(C.RAW_SETTINGS) * len(C.EPOCHS) == 21
     print("ok  model specs and grid")
 
 
@@ -63,7 +64,7 @@ def test_aggregation():
 
     with tempfile.TemporaryDirectory() as tmp:
         root, reports = Path(tmp) / "results", Path(tmp) / "reports"
-        rewritten_of = C.RAW_TO_REWRITTEN
+        rewritten_of = C.RAW_COMPARATOR
         for cell in C.grid_cells():
             source = per_cell[(rewritten_of[cell["setting"]], cell["seed"], cell["epoch"])]
             results = results_from_raw(fake_raw(source), cell=cell)
@@ -74,7 +75,7 @@ def test_aggregation():
         assert aggregate.main(["--results-root", str(root), "--out-dir", str(reports)]) == 0
 
         rows = list(csv.DictReader(open(reports / "raw_vs_rewritten.csv")))
-        assert len(rows) == 4 * 3 * len(aggregate.ALL_BENCHMARKS), len(rows)
+        assert len(rows) == len(C.RAW_SETTINGS) * 3 * len(aggregate.ALL_BENCHMARKS), len(rows)
         for row in rows:
             assert row["n_paired"] == "3" and abs(float(row["delta_mean"])) < 1e-12, row
 
@@ -87,8 +88,8 @@ def test_aggregation():
                     assert abs(float(ours["mean"]) - float(v2["mean"])) < 2e-6, (ours, v2)
                     assert abs(float(ours["std"]) - float(v2["std"])) < 2e-6, (ours, v2)
         report = (reports / "raw_selected_report.md").read_text()
-        assert "Coverage: **36 / 36**" in report and "## Summary: average accuracy (Mean6)" in report
-    print("ok  aggregation reproduces the v2 Mean6/MMLU tables; all 4x3x12 deltas are 0")
+        assert f"Coverage: **{len(C.grid_cells())} / {len(C.grid_cells())}**" in report and "## Summary: average accuracy (Mean6)" in report
+    print("ok  aggregation reproduces the v2 Mean6/MMLU tables; all 7x3x12 deltas are 0")
 
 
 def test_reference_compare():

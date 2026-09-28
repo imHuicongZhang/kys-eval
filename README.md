@@ -1,10 +1,11 @@
 # kys-eval: evaluation of the Know-Your-Sources raw-selected baselines
 
-This repository scores the 36 raw-selected baseline checkpoints (4 settings × seeds 42/43/44 ×
+This repository scores the 63 raw-selected baseline checkpoints (7 settings × seeds 42/43/44 ×
 epochs 1/2/3). It uses exactly the protocol of the **v2 evaluation** of the 54 rewritten-arm
 checkpoints: the same LightEval commit and patch, tasks, 0-shot setting, metric, dataset
-revisions, model loading and GPU type. It then compares each raw setting with its rewritten
-counterpart.
+revisions, model loading and GPU type. It then compares each raw setting with its v2 comparator: the rewritten
+counterpart for the four strategy-linked controls, the fastText Quality-Base arm for the three global
+Top-10B selections.
 
 > v2 numbers are not the numbers printed in the paper's tables. The paper's tables come from the
 > paper-era checkpoints (steps 4770 / 9540 / 14305, and 14147 for Diversity Oriented). v2 re-scored
@@ -27,7 +28,7 @@ python -m kys_eval.prefetch                 # download the 7 datasets at pinned 
 # 1) reference check on a GPU node: must print PASS before scoring new models
 python -m kys_eval.reference_check --model /path/to/diversity-first-10B-1.5B-seed42/14305
 
-# 2) score the grid: all 36 checkpoints in one job ...
+# 2) score the grid: all 63 checkpoints in one job ...
 python -m kys_eval.run_grid --delete-weights
 #    ... or as a SLURM array (edit the placeholders first, see "SLURM")
 mkdir -p logs && sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch
@@ -78,7 +79,7 @@ python -m kys_eval.eval_checkpoint \
 ```bash
 python -m kys_eval.run_grid --list --check-hub        # index, done/pending, present on hub
 python -m kys_eval.run_grid                           # all pending cells, sequentially
-python -m kys_eval.run_grid --seeds 43                # one seed (12 cells)
+python -m kys_eval.run_grid --seeds 43                # one seed (21 cells)
 python -m kys_eval.run_grid --settings raw_random --epochs ep3
 python -m kys_eval.run_grid --index 5                 # one cell of the (filtered) list
 ```
@@ -102,8 +103,8 @@ python -m kys_eval.run_grid --index 5                 # one cell of the (filtere
 ```bash
 mkdir -p logs
 python -m kys_eval.prefetch                                                            # once, before any array
-sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch                    # 36 tasks (0-35)
-sbatch --array=0-11 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="--seeds 44" slurm/eval_grid_array.sbatch
+sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch                    # 63 tasks (0-62)
+sbatch --array=0-20 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="--seeds 44" slurm/eval_grid_array.sbatch
 ```
 
 - The script activates `${KYS_VENV:-$KYS_EVAL_ROOT/.venv}`, sets `HF_HOME=${HF_HOME:-$KYS_EVAL_ROOT/hf_cache}`, and runs `run_grid --index $SLURM_ARRAY_TASK_ID --delete-weights $KYS_GRID_ARGS`.
@@ -151,16 +152,21 @@ It reads every complete `results/raw_selected/seed*/*/ep*/results.json`, togethe
   - One table per benchmark: MMLU, ARC-Easy, HellaSwag, PIQA, SIQA, OpenBookQA, CommonsenseQA, and the four MMLU categories.
   - In every table, rows are settings, columns are ep1/ep2/ep3, and cells are mean ± std over seeds.
 - `reports/raw_vs_rewritten.md`:
-  - For each benchmark, each raw setting next to its rewritten counterpart at every epoch: raw mean ± std, rewritten mean ± std, **Δ = rewritten − raw**, and the number of seeds with Δ > 0.
+  - For each benchmark, each raw setting next to its comparator at every epoch: raw mean ± std, comparator mean ± std, **Δ = comparator − raw**, and the number of seeds with Δ > 0. For the three global Top-10B settings the comparator is Quality-Base, so Δ compares selection scores on raw data, not rewriting.
   - Δ is paired by seed: the mean ± std of the per-seed differences.
 - The same numbers as CSV: `raw_selected_per_checkpoint.csv`, `raw_selected_by_epoch.csv` and `raw_vs_rewritten.csv`.
 
-| Raw-selected | Rewritten counterpart (v2 run stem) |
-|---|---|
-| `raw_diversity_oriented` | `diversity_oriented` (`diversity-first`) |
-| `raw_disagreement_aware` | `disagreement_aware` (`signal-disagreement-lambda05`) |
-| `raw_random` | `wrap_inspired` (`wrap`) |
-| `raw_rewire_inspired` | `rewire_inspired` (`rewrite`) |
+| Raw-selected | Comparator (v2 run stem) | Kind |
+|---|---|---|
+| `raw_diversity_oriented` | `diversity_oriented` (`diversity-first`) | strategy-linked |
+| `raw_disagreement_aware` | `disagreement_aware` (`signal-disagreement-lambda05`) | strategy-linked |
+| `raw_random` | `wrap_inspired` (`wrap`) | strategy-linked |
+| `raw_rewire_inspired` | `rewire_inspired` (`rewrite`) | strategy-linked (conditional on REWIRE's post-rewrite filter) |
+| `raw_top10b_fineweb_edu` | `quality_base` (`quality-base`) | global Top-10B |
+| `raw_top10b_modernbert` | `quality_base` (`quality-base`) | global Top-10B |
+| `raw_top10b_consensus` | `quality_base` (`quality-base`) | global Top-10B |
+
+What each raw corpus is, and what each comparison can and cannot show: `configs/1.5B-baseline/WORKFLOW_RAW_BASELINES.md` in `imHuicongZhang/nanotron` (branch `huicong-dev`).
 
 ### Other tools
 
@@ -173,12 +179,13 @@ It reads every complete `results/raw_selected/seed*/*/ep*/results.json`, togethe
 
 ## Checkpoint layout
 
-36 checkpoints in HF model repo `blab-jhu/KYS-1.5B-Raw-Selected-Baselines`:
+63 checkpoints in HF model repo `blab-jhu/KYS-1.5B-Raw-Selected-Baselines`:
 
 ```
 rewrite-1p5b/seed<S>/<setting>/ep<N>/hf/      config.json, *.safetensors, tokenizer.json, tokenizer_config.json
   S       ∈ 42, 43, 44
-  setting ∈ raw_diversity_oriented, raw_disagreement_aware, raw_random, raw_rewire_inspired
+  setting ∈ raw_diversity_oriented, raw_disagreement_aware, raw_random, raw_rewire_inspired,
+            raw_top10b_fineweb_edu, raw_top10b_modernbert, raw_top10b_consensus
   N       ∈ 1 (step 4768), 2 (step 9537), 3 (step 14305)
 ```
 

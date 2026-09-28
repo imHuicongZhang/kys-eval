@@ -2,7 +2,7 @@
 
 Everything here is pinned to the "v2" evaluation of the 54 rewritten-arm checkpoints
 (6 settings x 3 seeds x 3 epochs, HF exports under rewrite-1p5b-hf, results in
-projects/rewrite/08_evaluation/04_results_1p5_v2 on the originating cluster), so that the 36
+projects/rewrite/08_evaluation/04_results_1p5_v2 on the originating cluster), so that the 63
 raw-selected checkpoints scored with this configuration are directly comparable to it.
 
 Note: v2 numbers are NOT the numbers printed in the paper's tables. The paper's tables come from the
@@ -159,11 +159,17 @@ REQUIRED_GPU_SUBSTRING = "H100"
 V2_SECONDS_PER_CHECKPOINT = 548  # measured, diversity_oriented seed42 ep3, one H100
 
 # =============================================================================================
-# Raw-selected grid: 4 settings x 3 seeds x 3 epochs = 36 checkpoints
+# Raw-selected grid: 7 settings x 3 seeds x 3 epochs = 63 checkpoints
+#   4 strategy-linked raw controls (shared 5B anchor + raw source docs of a rewritten arm) and
+#   3 global Top-10B quality selections (no anchor), compared against the fastText quality_base arm.
+#   Settings and comparators mirror tools/kys_raw/registry.py in the nanotron repo.
 # =============================================================================================
 HF_REPO = "blab-jhu/KYS-1.5B-Raw-Selected-Baselines"
 HF_ROOT_PREFIX = "rewrite-1p5b"
-RAW_SETTINGS = ["raw_diversity_oriented", "raw_disagreement_aware", "raw_random", "raw_rewire_inspired"]
+RAW_SETTINGS = [
+    "raw_diversity_oriented", "raw_disagreement_aware", "raw_random", "raw_rewire_inspired",
+    "raw_top10b_fineweb_edu", "raw_top10b_modernbert", "raw_top10b_consensus",
+]
 SEEDS = [42, 43, 44]
 EPOCHS = ["ep1", "ep2", "ep3"]
 EPOCH_STEPS = {"ep1": 4768, "ep2": 9537, "ep3": 14305}  # same steps as the v2 rewritten grid
@@ -176,7 +182,7 @@ def hf_subfolder(seed: int, setting: str, epoch: str) -> str:
 
 
 def grid_cells(seeds=SEEDS, settings=RAW_SETTINGS, epochs=EPOCHS):
-    """Checkpoints in fixed order (seed, setting, epoch); index 0..35 for the full grid."""
+    """Checkpoints in fixed order (seed, setting, epoch); index 0..62 for the full grid."""
     return [
         {"setting": s, "seed": seed, "epoch": e, "step": EPOCH_STEPS[e], "hf_subfolder": hf_subfolder(seed, s, e)}
         for seed in seeds
@@ -208,12 +214,19 @@ PAPER_LABEL = {
     "wrap_inspired": "WRAP Inspired",
     "rewire_inspired": "REWIRE Inspired",
 }
-RAW_TO_REWRITTEN = {
+RAW_TO_REWRITTEN = {  # strategy-linked raw controls -> their rewritten counterpart
     "raw_diversity_oriented": "diversity_oriented",
     "raw_disagreement_aware": "disagreement_aware",
     "raw_random": "wrap_inspired",
     "raw_rewire_inspired": "rewire_inspired",
 }
+GLOBAL_TOP10B_TO_QUALITY_BASE = {  # global Top-10B selections -> the existing fastText Quality-Base (not a rewrite)
+    "raw_top10b_fineweb_edu": "quality_base",
+    "raw_top10b_modernbert": "quality_base",
+    "raw_top10b_consensus": "quality_base",
+}
+RAW_COMPARATOR = {**RAW_TO_REWRITTEN, **GLOBAL_TOP10B_TO_QUALITY_BASE}
+assert list(RAW_COMPARATOR) == RAW_SETTINGS
 # Per-task v2 results for the 54 rewritten checkpoints (acc and acc_norm, all 63 tasks + _average).
 REWRITTEN_V2_PER_TASK_CSV = REPO_ROOT / "reference" / "rewritten_v2_54_per_task.csv"
 
