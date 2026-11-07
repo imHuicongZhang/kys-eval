@@ -2,7 +2,7 @@
 
   python -m kys_eval.selftest
 
-1. model spec parsing and the 63-cell grid
+1. model spec parsing and the 72-cell grid
 2. aggregation: builds a synthetic raw-selected results tree in which every raw cell carries the
    scores of its rewritten counterpart, runs kys_eval.aggregate, and asserts that every delta is 0 and
    that the per-epoch Mean6/MMLU means reproduce the v2 tables in reference/
@@ -49,9 +49,13 @@ def test_specs_and_grid():
     assert common.parse_model_spec("/tmp/x")["kind"] == "local"
     cells = C.grid_cells()
     n = len(C.RAW_SETTINGS) * len(C.SEEDS) * len(C.EPOCHS)
-    assert n == 63 and len(cells) == n and len({c["hf_subfolder"] for c in cells}) == n
+    assert n == 72 and len(cells) == n and len({c["hf_subfolder"] for c in cells}) == n
     assert cells[0]["hf_subfolder"] == "rewrite-1p5b/seed42/raw_diversity_oriented/ep1/hf"
-    assert len(selected_cells([43], C.RAW_SETTINGS, C.EPOCHS)) == len(C.RAW_SETTINGS) * len(C.EPOCHS) == 21
+    assert cells[21]["hf_subfolder"] == "rewrite-1p5b/seed42/signal-disagreement-lambda0/ep1/hf", cells[21]
+    assert C.RAW_COMPARATOR["signal-disagreement-lambda0"] == "disagreement_aware"
+    assert C.REWRITTEN_V2_RUN_STEM[C.RAW_COMPARATOR["signal-disagreement-lambda0"]] == "signal-disagreement-lambda05"
+    assert {C.comparison_kind(s) for s in C.RAW_SETTINGS} == {"strategy-linked", "global Top-10B", "λ grid (λ = 0 vs 0.5)"}
+    assert len(selected_cells([43], C.RAW_SETTINGS, C.EPOCHS)) == len(C.RAW_SETTINGS) * len(C.EPOCHS) == 24
     print("ok  model specs and grid")
 
 
@@ -89,7 +93,7 @@ def test_aggregation():
                     assert abs(float(ours["std"]) - float(v2["std"])) < 2e-6, (ours, v2)
         report = (reports / "raw_selected_report.md").read_text()
         assert f"Coverage: **{len(C.grid_cells())} / {len(C.grid_cells())}**" in report and "## Summary: average accuracy (Mean6)" in report
-    print("ok  aggregation reproduces the v2 Mean6/MMLU tables; all 7x3x12 deltas are 0")
+    print(f"ok  aggregation reproduces the v2 Mean6/MMLU tables; all {len(C.RAW_SETTINGS)}x3x12 deltas are 0")
 
 
 def test_reference_compare():

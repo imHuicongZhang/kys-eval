@@ -1,11 +1,11 @@
 """Evaluate the raw-selected grid (or part of it) from the HF model repo.
 
-Cells are ordered (seed, setting, epoch); with no filters the indices are 0..35. Filters keep that
+Cells are ordered (seed, setting, epoch); with no filters the indices are 0..71. Filters keep that
 order, so `--list` with the same filters shows the indices a SLURM array should use.
 
   python -m kys_eval.run_grid --list --check-hub          # show cells, their status, and hub availability
   python -m kys_eval.run_grid                             # evaluate every pending cell, one after another
-  python -m kys_eval.run_grid --seeds 42                  # one seed (21 cells)
+  python -m kys_eval.run_grid --seeds 42                  # one seed (24 cells)
   python -m kys_eval.run_grid --index 7                   # one cell (for SLURM arrays)
 
 Results go to <results-root>/raw_selected/seed<S>/<setting>/ep<N>/{results.json,summary.md}.

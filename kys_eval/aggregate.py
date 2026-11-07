@@ -10,7 +10,8 @@ results in reference/rewritten_v2_54_per_task.csv, and writes into --out-dir:
                                    cells = mean ± std over seeds
   raw_vs_rewritten.md              each raw setting next to its v2 comparator, with deltas: the rewritten
                                    counterpart for the four strategy-linked controls, the fastText
-                                   quality_base arm for the three global Top-10B selections
+                                   quality_base arm for the three global Top-10B selections, the
+                                   lambda = 0.5 disagreement_aware arm for signal-disagreement-lambda0
   raw_selected_per_checkpoint.csv  one row per evaluated checkpoint
   raw_selected_by_epoch.csv        setting x epoch x benchmark: mean, std, n, seeds
   raw_vs_rewritten.csv             pair x epoch x benchmark: raw and comparator stats, paired delta
@@ -172,9 +173,11 @@ def write_pair_report(raw, rewritten, out_dir):
         "# Raw-selected vs v2 comparators", "",
         "Each raw-selected setting next to its v2 comparator, per epoch. Columns are `acc_norm` in percent, "
         "mean ± std over seeds.", "",
-        "Two kinds of pairs. The four **strategy-linked** controls are compared with their rewritten counterpart. "
+        "Three kinds of pairs. The four **strategy-linked** controls are compared with their rewritten counterpart. "
         "The three **global Top-10B** selections are compared with the existing fastText Quality-Base arm: that "
-        "is a comparison between selection scores on raw data, not a rewriting comparison.", "",
+        "is a comparison between selection scores on raw data, not a rewriting comparison. The **λ grid** arm "
+        "`signal-disagreement-lambda0` (Disagreement-Aware selection at λ = 0, rewritten) is compared with the "
+        "published λ = 0.5 Disagreement-Aware arm: both are rewritten, so Δ isolates the disagreement term.", "",
         "**Δ = comparator − raw**, in accuracy points: positive means the comparator scores higher. Δ is the mean "
         "of the per-seed differences (the two arms share each seed's initialization), ± the standard deviation of "
         "those differences; *Seeds Δ>0* counts seeds with a positive difference.", "",
@@ -182,7 +185,7 @@ def write_pair_report(raw, rewritten, out_dir):
         f"all scored on {C.REFERENCE_GPU}). These are not the paper's printed table values.", "",
         "| Raw-selected | Kind | Comparator |", "|---|---|---|",
     ]
-    lines += [f"| `{r}` | {'strategy-linked' if r in C.RAW_TO_REWRITTEN else 'global Top-10B'} | {C.PAPER_LABEL[w]} (`{w}`) |"
+    lines += [f"| `{r}` | {C.comparison_kind(r)} | {C.PAPER_LABEL[w]} (`{w}`) |"
               for r, w in C.RAW_COMPARATOR.items()] + [""]
     lines += gpu_notes(raw)
 
