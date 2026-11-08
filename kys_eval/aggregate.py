@@ -3,7 +3,7 @@
   python -m kys_eval.aggregate [--results-root results] [--out-dir reports]
 
 Reads <results-root>/raw_selected/seed*/*/ep*/results.json (only complete ones) and the v2 rewritten
-results in reference/rewritten_v2_54_per_task.csv, and writes into --out-dir:
+results at full precision in reference/rewritten_v2_54_per_task.json, and writes into --out-dir:
 
   raw_selected_report.md           summary table of average accuracy (Mean6), then one table per
                                    benchmark: rows = setting, columns = ep1/ep2/ep3,
@@ -58,14 +58,23 @@ def load_raw(results_root):
     return cells, problems
 
 
-def load_rewritten(path=C.REWRITTEN_V2_PER_TASK_CSV):
-    acc_norm, meta = defaultdict(dict), {}
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            key = (row["setting"], int(row["seed"]), row["epoch"])
-            acc_norm[key][row["task"]] = float(row["acc_norm"])
-            meta[key] = (int(row["step"]), row["gpu"])
-    return {k: {**common.benchmark_scores(v), "step": meta[k][0], "gpu": meta[k][1]} for k, v in acc_norm.items()}
+def load_rewritten(path=C.REWRITTEN_V2_PER_TASK_JSON):
+    """v2 comparator scores per (setting, seed, epoch), from the full-precision reference JSON.
+
+    No tolerance is applied when pairing. LightEval and kys-eval both serialize floats with Python's json module
+    (shortest round-trip repr), and so does reference/build_rewritten_v2_reference.py, so a raw-selected cell and a
+    comparator built from the same LightEval output hold bit-identical doubles, and benchmark_scores() combines them in
+    a fixed order: identical inputs give a difference of exactly 0.0. The 10-decimal CSV is not accepted here.
+    """
+    data = json.loads(Path(path).read_text())
+    if data.get("schema") != C.REWRITTEN_V2_REFERENCE_SCHEMA:
+        raise SystemExit(f"{path} is not a {C.REWRITTEN_V2_REFERENCE_SCHEMA} file (the 10-decimal CSV is not accepted)")
+    out = {}
+    for cell in data["cells"]:
+        acc_norm = {t: v["acc_norm"] for t, v in cell["tasks"].items()}
+        out[(cell["setting"], int(cell["seed"]), cell["epoch"])] = {
+            **common.benchmark_scores(acc_norm), "step": int(cell["step"]), "gpu": cell["gpu"]}
+    return out
 
 
 def seed_values(cells, setting, epoch, benchmark):
@@ -199,7 +208,7 @@ def write_pair_report(raw, rewritten, out_dir):
         "share each seed's initialization), ± the sample standard deviation (ddof 1) of those differences; "
         "*Seeds Δ>0* counts seeds in which the setting is higher. The v2 Quality-Base seed-42 checkpoints were "
         "trained with micro-batch 16 / accumulation 16 (all other v2 and all raw-selected runs: 32 / 8).", "",
-        "Comparator side: the v2 evaluation of the 54 rewritten-grid checkpoints (`reference/rewritten_v2_54_per_task.csv`, "
+        "Comparator side: the v2 evaluation of the 54 rewritten-grid checkpoints (`reference/rewritten_v2_54_per_task.json`, full precision, "
         f"all scored on {C.REFERENCE_GPU}). These v2 checkpoints are the source of the paper's ICLR tables.", "",
         "| Raw-selected | Kind | Primary comparator | Also paired with |", "|---|---|---|---|",
     ]
@@ -254,13 +263,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--results-root", default=str(C.RESULTS_ROOT), help="default: %(default)s")
     parser.add_argument("--out-dir", default=str(C.REPORTS_DIR), help="default: %(default)s")
-    parser.add_argument("--rewritten-csv", default=str(C.REWRITTEN_V2_PER_TASK_CSV), help="default: %(default)s")
+    parser.add_argument("--rewritten-reference", default=str(C.REWRITTEN_V2_PER_TASK_JSON),
+                        help="full-precision v2 reference JSON (default: %(default)s)")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     raw, problems = load_raw(args.results_root)
-    rewritten = load_rewritten(args.rewritten_csv)
+    rewritten = load_rewritten(args.rewritten_reference)
     missing = write_raw_report(raw, problems, args.results_root, out_dir)
     write_pair_report(raw, rewritten, out_dir)
     print(f"[kys] aggregated {len(raw)}/{len(C.grid_cells())} raw-selected checkpoints ({len(problems)} files skipped)")

@@ -9,7 +9,7 @@ Top-10B selections, and the λ = 0.5 Disagreement-Aware arm for the λ = 0 arm `
 
 > The v2 checkpoints (`wytro/KYS-1.5B-Rewritten-v2`, steps 4768 / 9537 / 14305) and their v2 evaluation
 > are the source of the paper's ICLR tables. The same v2 results are the comparator here
-> (`reference/rewritten_v2_54_per_task.csv`), and `python -m kys_eval.selftest` checks that kys-eval's
+> (`reference/rewritten_v2_54_per_task.json`, full precision), and `python -m kys_eval.selftest` checks that kys-eval's
 > aggregation reproduces the v2 per-epoch Mean6 and MMLU tables in `reference/`.
 
 Run every command from the repository root. Evaluation needs one NVIDIA H100 per checkpoint.
@@ -54,8 +54,10 @@ python -m kys_eval.aggregate                # -> reports/raw_selected_report.md,
 
 It also prints the visible GPU. `eval_checkpoint`, `run_grid` and `reference_check` refuse to run if these checks fail, unless you pass `--allow-env-mismatch`.
 
-The raw-selected HF repo is public. If a repo you point at is private, run `huggingface-cli login` or
-set `HF_TOKEN` in the environment. Never write a token into this repository.
+The raw-selected HF repo `blab-jhu/KYS-1.5B-Raw-Selected-Baselines` is **gated**: downloading its checkpoints
+needs `huggingface-cli login` (or `HF_TOKEN` in the environment) with an account that has accepted its access
+conditions, on every node that scores; uploading to it needs a token with write access to `blab-jhu`. The reference
+checkpoint repo `wytro/KYS-1.5B-Rewritten-v2` is public. Never write a token into this repository.
 
 ## Commands
 
@@ -134,8 +136,10 @@ It writes `results/reference_check/{results.json,summary.md,reference_check.md,r
 |---|---|---|---|---|---|---|---|
 | 51.52 | 49.82 | 72.03 | 39.10 | 35.20 | 31.45 | **46.52** | **30.97** |
 
-These are the expected `acc_norm` scores in percent, from v2 on an NVIDIA H100 80GB HBM3. The reference checkpoint is **not on the public Hub**; get it from the maintainers. It is not the
-same checkpoint as `blab-jhu/KYS-1.5B-Diversity-Oriented` `seed42/epoch3` (paper-era step 14147).
+These are the expected `acc_norm` scores in percent, from v2 on an NVIDIA H100 80GB HBM3. The reference checkpoint is public:
+`hf://wytro/KYS-1.5B-Rewritten-v2/rewrite-1p5b/seed42/diversity_oriented/ep3/hf@b22c87333783945e1c655ae46886b7e842ee4203`
+(its `model.safetensors` sha256 is the one in the expected JSON). It is a different checkpoint from
+`blab-jhu/KYS-1.5B-Diversity-Oriented` `seed42/epoch3` (step 14147).
 
 If the check fails:
 - **Hash mismatch:** the environment or datasets differ. Rerun `install.sh`, clear `HF_HOME`, and prefetch again.
@@ -147,7 +151,7 @@ If the check fails:
 python -m kys_eval.aggregate [--results-root results] [--out-dir reports]
 ```
 
-It reads every complete `results/raw_selected/seed*/*/ep*/results.json`, together with the v2 rewritten results in `reference/rewritten_v2_54_per_task.csv`. It can run at any point; missing cells are listed.
+It reads every complete `results/raw_selected/seed*/*/ep*/results.json`, together with the v2 rewritten results at full precision in `reference/rewritten_v2_54_per_task.json`. It can run at any point; missing cells are listed.
 
 - `reports/raw_selected_report.md`:
   - Coverage and the GPUs used.
@@ -274,7 +278,8 @@ Aggregates (unweighted, as in the paper and v2):
 | `install.sh`, `requirements.txt`, `patches/` | pinned environment |
 | `slurm/` | SLURM templates with placeholders |
 | `reference/expected_diversity_oriented_seed42_ep3.json` | reference checkpoint identity, scores and hashes |
-| `reference/rewritten_v2_54_per_task.csv` | v2 per-task `acc`/`acc_norm` for the 54 rewritten checkpoints |
+| `reference/rewritten_v2_54_per_task.json` | v2 per-task `acc`/`acc_norm` for the 54 rewritten checkpoints at full precision, with each source file's sha256; what `aggregate.py` pairs against (built by `reference/build_rewritten_v2_reference.py`) |
+| `reference/rewritten_v2_54_per_task.csv` | the same values rounded to 10 decimals, for reading; not used for pairing (rounding turned exact ties into ±1e-11 differences) |
 | `reference/rewritten_v2_{mean6,mmlu}_by_epoch.csv` | v2 seed-aggregated tables, used by the self-test |
 
 `results/`, `model_cache/`, `hf_cache/`, `third_party/`, `.venv/`, logs and credential files are git-ignored.

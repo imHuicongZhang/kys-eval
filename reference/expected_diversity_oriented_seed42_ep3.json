@@ -14,7 +14,7 @@
    "tokenizer.json": "81bb383c6138159665cd350a59fbcb5aa1fe65712cf5ed9b6481bc802cdbd8e5",
    "tokenizer_config.json": "8ba920524e55c04d9d5e31283e202b6d6e4d5734966f35464ffc7db4f0ea1af8"
   },
-  "note": "Not on the public HF Hub. NOT the same weights as blab-jhu/KYS-1.5B-Diversity-Oriented seed42/epoch3 (paper-era step 14147)."
+  "note": "Public at hf://wytro/KYS-1.5B-Rewritten-v2/rewrite-1p5b/seed42/diversity_oriented/ep3/hf@b22c87333783945e1c655ae46886b7e842ee4203 (v2, the source of the paper's ICLR tables). A different checkpoint from blab-jhu/KYS-1.5B-Diversity-Oriented seed42/epoch3 (step 14147)."
  },
  "recorded": {
   "gpu": "NVIDIA H100 80GB HBM3",

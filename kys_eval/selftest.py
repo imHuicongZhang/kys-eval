@@ -60,12 +60,82 @@ def test_specs_and_grid():
     print("ok  model specs and grid")
 
 
+def reference_tasks():
+    """{(setting, seed, epoch): {task: {"acc", "acc_norm"}}} from the full-precision v2 reference JSON."""
+    data = json.loads(C.REWRITTEN_V2_PER_TASK_JSON.read_text())
+    return {(c["setting"], int(c["seed"]), c["epoch"]): {t: dict(v) for t, v in c["tasks"].items()} for c in data["cells"]}
+
+
+def test_pairing_statistics():
+    """Pairing at different serialization precision, genuine differences, exact ties, mean / ddof-1 SD / seed counts."""
+    ref = reference_tasks()
+    # 1. serialization: every reference double survives json round trips (the results.json path) unchanged
+    for tasks in ref.values():
+        for v in tasks.values():
+            for x in v.values():
+                assert json.loads(json.dumps(x)) == x and json.loads(json.dumps({"x": x}, indent=1))["x"] == x
+    # ... while the 10-decimal CSV does not reproduce them: the hazard the JSON reference removes
+    csv_vals = {(r["setting"], int(r["seed"]), r["epoch"], r["task"]): float(r["acc_norm"])
+                for r in csv.DictReader(open(C.REWRITTEN_V2_PER_TASK_CSV))}
+    rounded_differs = sum(csv_vals[(*k, t)] != v["acc_norm"] for k, tasks in ref.items() for t, v in tasks.items())
+    assert rounded_differs > 0 and all(abs(csv_vals[(*k, t)] - v["acc_norm"]) <= 5e-11
+                                       for k, tasks in ref.items() for t, v in tasks.items())
+    try:
+        aggregate.load_rewritten(C.REWRITTEN_V2_PER_TASK_CSV)
+        raise AssertionError("the 10-decimal CSV must be refused as a pairing reference")
+    except (SystemExit, ValueError):
+        pass
+
+    # 2.-4. one raw setting (raw_diversity_oriented vs diversity_oriented) with known per-seed offsets on every task
+    setting, comp = "raw_diversity_oriented", C.RAW_COMPARATOR["raw_diversity_oriented"]
+    cases = {  # epoch -> per-seed offset added to every acc_norm (fraction); mean, ddof-1 SD, positive seeds
+        "ep1": {42: 0.01, 43: -0.02, 44: 0.03},    # genuine mixed signs
+        "ep2": {42: 0.0, 43: 0.0, 44: 0.0},        # exact ties
+        "ep3": {42: 0.01, 43: 0.0, 44: -0.01},     # one tie, one positive, one negative
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        root, reports = Path(tmp) / "results", Path(tmp) / "reports"
+        for seed in C.SEEDS:
+            for ep, offs in cases.items():
+                src = ref[(comp, seed, ep)]
+                shifted = {t: {"acc": v["acc"], "acc_norm": v["acc_norm"] + offs[seed]} for t, v in src.items()}
+                cell = next(c for c in C.grid_cells() if (c["setting"], c["seed"], c["epoch"]) == (setting, seed, ep))
+                out = cell_dir(root, cell)
+                out.mkdir(parents=True)
+                common.write_json(out / "results.json", results_from_raw(fake_raw(shifted), cell=cell))
+        aggregate.main(["--results-root", str(root), "--out-dir", str(reports)])
+        rows = {(r["raw_setting"], r["comparator_setting"], r["epoch"], r["benchmark"]): r
+                for r in csv.DictReader(open(reports / "raw_vs_rewritten.csv"))}
+        v2 = aggregate.load_rewritten()
+        for ep, offs in cases.items():
+            for bench, _ in aggregate.ALL_BENCHMARKS:
+                # expected per-seed differences, computed independently from the shifted task values
+                d = []
+                for seed in C.SEEDS:
+                    src = ref[(comp, seed, ep)]
+                    new = common.benchmark_scores({t: v["acc_norm"] + offs[seed] for t, v in src.items()})[bench]
+                    d.append(new - v2[(comp, seed, ep)][bench])
+                r = rows[(setting, comp, ep, bench)]
+                assert r["n_paired"] == "3", r
+                assert r["n_delta_positive"] == str(sum(x > 0 for x in d)), (r, d)
+                assert float(r["delta_mean"]) == float(f"{statistics.fmean(d):.6f}"), (r, d)
+                assert float(r["delta_std"]) == float(f"{statistics.stdev(d):.6f}"), (r, d)
+                if ep == "ep2":
+                    assert float(r["delta_mean"]) == 0.0 and r["n_delta_positive"] == "0", r
+                # the offsets themselves (every benchmark is a mean of shifted values, so Δ = offset)
+                assert max(abs(x - offs[s]) for x, s in zip(d, C.SEEDS)) < 1e-12, (bench, d)
+        want = {"ep1": (0.02 / 3, statistics.stdev([0.01, -0.02, 0.03]), 2), "ep2": (0.0, 0.0, 0),
+                "ep3": (0.0, 0.01, 1)}
+        for ep, (m, sd, k) in want.items():
+            r = rows[(setting, comp, ep, "mean6")]
+            assert abs(float(r["delta_mean"]) - m) < 1e-6 and abs(float(r["delta_std"]) - sd) < 1e-6, (ep, r)
+            assert r["n_delta_positive"] == str(k), (ep, r)
+    print("ok  pairing: full-precision reference round-trips; CSV refused; mixed-sign, tied and partly tied "
+          "differences give the right mean, ddof-1 SD and positive-seed counts")
+
+
 def test_aggregation():
-    per_cell = defaultdict(dict)
-    with open(C.REWRITTEN_V2_PER_TASK_CSV, newline="") as f:
-        for row in csv.DictReader(f):
-            per_cell[(row["setting"], int(row["seed"]), row["epoch"])][row["task"]] = {
-                "acc": float(row["acc"]), "acc_norm": float(row["acc_norm"])}
+    per_cell = reference_tasks()
 
     with tempfile.TemporaryDirectory() as tmp:
         root, reports = Path(tmp) / "results", Path(tmp) / "reports"
@@ -86,9 +156,10 @@ def test_aggregation():
         v2 = aggregate.load_rewritten()
         for row in rows:
             assert row["n_paired"] == "3", row
-            if row["comparison"] == "primary":
+            if row["comparison"] == "primary":  # identical doubles on both sides: exactly 0, no tolerance
                 assert row["comparator_setting"] == rewritten_of[row["raw_setting"]], row
-                assert abs(float(row["delta_mean"])) < 1e-12 and row["n_delta_positive"] == "0", row
+                assert float(row["delta_mean"]) == 0.0 and float(row["delta_std"]) == 0.0, row
+                assert row["n_delta_positive"] == "0", row
             else:  # the raw cell carries its primary comparator's scores, so Δ = primary − quality_base
                 assert row["comparison"] == "quality_base" == row["comparator_setting"], row
                 d = [v2[(rewritten_of[row["raw_setting"]], s, row["epoch"])][row["benchmark"]]
@@ -173,6 +244,7 @@ def main():
     test_specs_and_grid()
     test_result_identity()
     test_aggregation()
+    test_pairing_statistics()
     test_reference_compare()
     print("selftest passed")
     return 0

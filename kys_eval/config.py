@@ -5,10 +5,8 @@ Everything here is pinned to the "v2" evaluation of the 54 rewritten-arm checkpo
 projects/rewrite/08_evaluation/04_results_1p5_v2 on the originating cluster), so that the 72
 raw-selected checkpoints scored with this configuration are directly comparable to it.
 
-Note: v2 numbers are NOT the numbers printed in the paper's tables. The paper's tables come from the
-paper-era checkpoints (steps 4770 / 9540 / 14305, 14147 for Diversity Oriented); v2 re-evaluated
-the re-released branched-schedule checkpoints (steps 4768 / 9537 / 14305). v2 is the comparator by
-decision.
+The v2 checkpoints (wytro/KYS-1.5B-Rewritten-v2, steps 4768 / 9537 / 14305) and their v2 evaluation are
+the source of the paper's ICLR tables, and they are the comparator here.
 """
 
 import os
@@ -248,7 +246,12 @@ def comparison_kind(setting: str) -> str:
 
 assert list(RAW_COMPARATOR) == RAW_SETTINGS
 # Per-task v2 results for the 54 rewritten checkpoints (acc and acc_norm, all 63 tasks + _average).
-REWRITTEN_V2_PER_TASK_CSV = REPO_ROOT / "reference" / "rewritten_v2_54_per_task.csv"
+REWRITTEN_V2_PER_TASK_CSV = REPO_ROOT / "reference" / "rewritten_v2_54_per_task.csv"  # human-readable, 10 decimals
+# The same values at full precision (built by reference/build_rewritten_v2_reference.py from the 54 v2 LightEval
+# JSONs). aggregate.py pairs against this file: the CSV's rounding (|error| <= 5e-11) turned exact ties into
+# spurious nonzero differences and miscounted positive seeds.
+REWRITTEN_V2_PER_TASK_JSON = REPO_ROOT / "reference" / "rewritten_v2_54_per_task.json"
+REWRITTEN_V2_REFERENCE_SCHEMA = "kys-eval/rewritten-v2-reference/v1"
 
 # =============================================================================================
 # Reference check: one existing v2 checkpoint an operator re-scores before scoring new models
