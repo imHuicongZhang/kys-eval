@@ -7,10 +7,10 @@ revisions, model loading and GPU type. It then compares each raw setting with it
 counterpart for the four strategy-linked controls, the fastText Quality-Base arm for the three global
 Top-10B selections, and the λ = 0.5 Disagreement-Aware arm for the λ = 0 arm `signal-disagreement-lambda0`.
 
-> v2 numbers are not the numbers printed in the paper's tables. The paper's tables come from the
-> paper-era checkpoints (steps 4770 / 9540 / 14305, and 14147 for Diversity Oriented). v2 re-scored
-> the re-released checkpoints at steps 4768 / 9537 / 14305, with differences of up to about 1 point
-> per cell. v2 is the comparator by decision.
+> The v2 checkpoints (`wytro/KYS-1.5B-Rewritten-v2`, steps 4768 / 9537 / 14305) and their v2 evaluation
+> are the source of the paper's ICLR tables. The same v2 results are the comparator here
+> (`reference/rewritten_v2_54_per_task.csv`), and `python -m kys_eval.selftest` checks that kys-eval's
+> aggregation reproduces the v2 per-epoch Mean6 and MMLU tables in `reference/`.
 
 Run every command from the repository root. Evaluation needs one NVIDIA H100 per checkpoint.
 Everything else (install check, self-test, aggregation) runs on CPU.
