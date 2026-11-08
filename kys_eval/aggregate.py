@@ -8,13 +8,18 @@ results in reference/rewritten_v2_54_per_task.csv, and writes into --out-dir:
   raw_selected_report.md           summary table of average accuracy (Mean6), then one table per
                                    benchmark: rows = setting, columns = ep1/ep2/ep3,
                                    cells = mean ± std over seeds
-  raw_vs_rewritten.md              each raw setting next to its v2 comparator, with deltas: the rewritten
-                                   counterpart for the four strategy-linked controls, the fastText
-                                   quality_base arm for the three global Top-10B selections, the
-                                   lambda = 0.5 disagreement_aware arm for signal-disagreement-lambda0
+  raw_vs_rewritten.md              each raw-selected setting next to its v2 comparators, with paired deltas:
+                                   its primary comparator (the rewritten counterpart for the four
+                                   strategy-linked controls, the fastText quality_base arm for the three
+                                   global Top-10B selections, the lambda = 0.5 disagreement_aware arm for
+                                   signal-disagreement-lambda0) and, when that is not already quality_base,
+                                   also quality_base (the paper's Appendix F baseline)
   raw_selected_per_checkpoint.csv  one row per evaluated checkpoint
   raw_selected_by_epoch.csv        setting x epoch x benchmark: mean, std, n, seeds
   raw_vs_rewritten.csv             pair x epoch x benchmark: raw and comparator stats, paired delta
+
+Sign convention (Appendix F): delta = raw-selected setting − comparator, per seed; "Seeds Δ>0" counts the
+seeds in which the raw-selected setting scores higher than the comparator.
 """
 
 import argparse
@@ -168,6 +173,15 @@ def write_raw_report(raw, problems, results_root, out_dir):
     return missing
 
 
+def comparisons(raw_setting):
+    """[(comparator, role)]: the primary v2 comparator, then quality_base when it is not the primary."""
+    primary = C.RAW_COMPARATOR[raw_setting]
+    pairs = [(primary, "primary")]
+    if primary != C.APPENDIX_F_BASELINE:
+        pairs.append((C.APPENDIX_F_BASELINE, "quality_base"))
+    return pairs
+
+
 def write_pair_report(raw, rewritten, out_dir):
     lines = [
         "# Raw-selected vs v2 comparators", "",
@@ -177,30 +191,37 @@ def write_pair_report(raw, rewritten, out_dir):
         "The three **global Top-10B** selections are compared with the existing fastText Quality-Base arm: that "
         "is a comparison between selection scores on raw data, not a rewriting comparison. The **λ grid** arm "
         "`signal-disagreement-lambda0` (Disagreement-Aware selection at λ = 0, rewritten) is compared with the "
-        "published λ = 0.5 Disagreement-Aware arm: both are rewritten, so Δ isolates the disagreement term.", "",
-        "**Δ = comparator − raw**, in accuracy points: positive means the comparator scores higher. Δ is the mean "
-        "of the per-seed differences (the two arms share each seed's initialization), ± the standard deviation of "
-        "those differences; *Seeds Δ>0* counts seeds with a positive difference.", "",
+        "published λ = 0.5 Disagreement-Aware arm: both are rewritten, so Δ isolates the disagreement term. "
+        "Every setting whose primary comparator is not Quality-Base is also paired with Quality-Base, the "
+        "baseline of the paper's Appendix F.", "",
+        "**Δ = setting − comparator**, in accuracy points, the orientation of Appendix F: positive means the "
+        "raw-selected (or λ-grid) setting scores higher. Δ is the mean of the per-seed differences (both arms "
+        "share each seed's initialization), ± the sample standard deviation (ddof 1) of those differences; "
+        "*Seeds Δ>0* counts seeds in which the setting is higher. The v2 Quality-Base seed-42 checkpoints were "
+        "trained with micro-batch 16 / accumulation 16 (all other v2 and all raw-selected runs: 32 / 8).", "",
         "Comparator side: the v2 evaluation of the 54 rewritten-grid checkpoints (`reference/rewritten_v2_54_per_task.csv`, "
         f"all scored on {C.REFERENCE_GPU}). These v2 checkpoints are the source of the paper's ICLR tables.", "",
-        "| Raw-selected | Kind | Comparator |", "|---|---|---|",
+        "| Raw-selected | Kind | Primary comparator | Also paired with |", "|---|---|---|---|",
     ]
-    lines += [f"| `{r}` | {C.comparison_kind(r)} | {C.PAPER_LABEL[w]} (`{w}`) |"
-              for r, w in C.RAW_COMPARATOR.items()] + [""]
+    for r, w in C.RAW_COMPARATOR.items():
+        extra = [C.PAPER_LABEL[c] + f" (`{c}`)" for c, role in comparisons(r) if role != "primary"]
+        lines.append(f"| `{r}` | {C.comparison_kind(r)} | {C.PAPER_LABEL[w]} (`{w}`) | {', '.join(extra) or '—'} |")
+    lines.append("")
     lines += gpu_notes(raw)
 
     rows = []
+    PAIRS = [(r, c, role) for r in C.RAW_SETTINGS for c, role in comparisons(r)]
     sections = [("mean6", "Mean6 (commonsense average)"), ("mmlu", "MMLU (57-subject macro-average)")]
     sections += COMMONSENSE_BENCHMARKS + CATEGORY_BENCHMARKS
     for key, label in sections:
-        lines += [f"## {label}", "", "| Raw setting | Comparator | Epoch | Raw | Comparator | Δ (comparator − raw) | Seeds Δ>0 |",
+        lines += [f"## {label}", "", "| Setting | Comparator | Epoch | Setting score | Comparator score | Δ (setting − comparator) | Seeds Δ>0 |",
                   "|---|---|---|---|---|---|---|"]
-        for raw_setting, rewritten_setting in C.RAW_COMPARATOR.items():
+        for raw_setting, rewritten_setting, role in PAIRS:
             for epoch in C.EPOCHS:
                 rv = seed_values(raw, raw_setting, epoch, key)
                 wv = seed_values(rewritten, rewritten_setting, epoch, key)
                 paired = sorted(set(rv) & set(wv))
-                deltas = [wv[s] - rv[s] for s in paired]
+                deltas = [rv[s] - wv[s] for s in paired]
                 d_mean, d_std, d_n = summarize(deltas)
                 if d_n:
                     delta = common.pct(d_mean, signed=True) + ("" if d_std is None else f" ± {d_std * 100:.2f}")
@@ -211,7 +232,7 @@ def write_pair_report(raw, rewritten, out_dir):
                              f"{fmt_stat(wv.values())} | {delta} | {wins} |")
                 r_mean, r_std, r_n = summarize(rv.values())
                 w_mean, w_std, w_n = summarize(wv.values())
-                rows.append([raw_setting, rewritten_setting, epoch, key,
+                rows.append([raw_setting, rewritten_setting, role, epoch, key,
                              *(("" if x is None else f"{x:.6f}") for x in (r_mean, r_std)), r_n,
                              *(("" if x is None else f"{x:.6f}") for x in (w_mean, w_std)), w_n,
                              *(("" if x is None else f"{x:.6f}") for x in (d_mean, d_std)), d_n,
@@ -221,9 +242,10 @@ def write_pair_report(raw, rewritten, out_dir):
 
     with open(out_dir / "raw_vs_rewritten.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        # column names kept from the four-setting version; "rewritten_*" = the comparator arm
-        writer.writerow(["raw_setting", "rewritten_setting", "epoch", "benchmark",
-                         "raw_mean", "raw_std", "raw_n", "rewritten_mean", "rewritten_std", "rewritten_n",
+        # delta_* = raw_setting − comparator_setting (Appendix F orientation); n_delta_positive = seeds where
+        # raw_setting is higher. comparison = "primary" (C.RAW_COMPARATOR) or "quality_base".
+        writer.writerow(["raw_setting", "comparator_setting", "comparison", "epoch", "benchmark",
+                         "raw_mean", "raw_std", "raw_n", "comparator_mean", "comparator_std", "comparator_n",
                          "delta_mean", "delta_std", "n_paired", "n_delta_positive", "paired_seeds"])
         writer.writerows(rows)
 

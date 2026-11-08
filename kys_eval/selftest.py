@@ -14,6 +14,7 @@ Exit status: 0 all passed.
 import csv
 import copy
 import json
+import statistics
 import sys
 import tempfile
 from collections import defaultdict
@@ -79,9 +80,22 @@ def test_aggregation():
         assert aggregate.main(["--results-root", str(root), "--out-dir", str(reports)]) == 0
 
         rows = list(csv.DictReader(open(reports / "raw_vs_rewritten.csv")))
-        assert len(rows) == len(C.RAW_SETTINGS) * 3 * len(aggregate.ALL_BENCHMARKS), len(rows)
+        n_pairs = sum(len(aggregate.comparisons(r)) for r in C.RAW_SETTINGS)
+        assert n_pairs == len(C.RAW_SETTINGS) + 5, n_pairs  # 4 strategy-linked + lambda0 also vs quality_base
+        assert len(rows) == n_pairs * 3 * len(aggregate.ALL_BENCHMARKS), len(rows)
+        v2 = aggregate.load_rewritten()
         for row in rows:
-            assert row["n_paired"] == "3" and abs(float(row["delta_mean"])) < 1e-12, row
+            assert row["n_paired"] == "3", row
+            if row["comparison"] == "primary":
+                assert row["comparator_setting"] == rewritten_of[row["raw_setting"]], row
+                assert abs(float(row["delta_mean"])) < 1e-12 and row["n_delta_positive"] == "0", row
+            else:  # the raw cell carries its primary comparator's scores, so Δ = primary − quality_base
+                assert row["comparison"] == "quality_base" == row["comparator_setting"], row
+                d = [v2[(rewritten_of[row["raw_setting"]], s, row["epoch"])][row["benchmark"]]
+                     - v2[("quality_base", s, row["epoch"])][row["benchmark"]] for s in C.SEEDS]
+                assert abs(float(row["delta_mean"]) - statistics.fmean(d)) < 2e-6, (row, d)
+                assert abs(float(row["delta_std"]) - statistics.stdev(d)) < 2e-6, (row, d)
+                assert int(row["n_delta_positive"]) == sum(x > 0 for x in d), (row, d)
 
         by_epoch = {(r["setting"], r["epoch"], r["benchmark"]): r for r in csv.DictReader(open(reports / "raw_selected_by_epoch.csv"))}
         for name, bench in (("mean6", "mean6"), ("mmlu", "mmlu")):
@@ -93,7 +107,8 @@ def test_aggregation():
                     assert abs(float(ours["std"]) - float(v2["std"])) < 2e-6, (ours, v2)
         report = (reports / "raw_selected_report.md").read_text()
         assert f"Coverage: **{len(C.grid_cells())} / {len(C.grid_cells())}**" in report and "## Summary: average accuracy (Mean6)" in report
-    print(f"ok  aggregation reproduces the v2 Mean6/MMLU tables; all {len(C.RAW_SETTINGS)}x3x12 deltas are 0")
+    print(f"ok  aggregation reproduces the v2 Mean6/MMLU tables; primary-pair deltas are 0 and quality_base-pair "
+          f"deltas equal comparator − quality_base ({n_pairs} pairs x 3 x 12)")
 
 
 def test_reference_compare():

@@ -233,6 +233,8 @@ LAMBDA_GRID_TO_REWRITTEN = {  # rewritten lambda-grid arms -> the published Disa
     "signal-disagreement-lambda0": "disagreement_aware",
 }
 RAW_COMPARATOR = {**RAW_TO_REWRITTEN, **GLOBAL_TOP10B_TO_QUALITY_BASE, **LAMBDA_GRID_TO_REWRITTEN}
+# The paper's Appendix F baseline; aggregate.py also pairs every setting whose primary comparator differs with it.
+APPENDIX_F_BASELINE = "quality_base"
 
 
 def comparison_kind(setting: str) -> str:
