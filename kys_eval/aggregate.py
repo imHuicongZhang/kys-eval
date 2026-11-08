@@ -182,7 +182,7 @@ def write_pair_report(raw, rewritten, out_dir):
         "of the per-seed differences (the two arms share each seed's initialization), ± the standard deviation of "
         "those differences; *Seeds Δ>0* counts seeds with a positive difference.", "",
         "Comparator side: the v2 evaluation of the 54 rewritten-grid checkpoints (`reference/rewritten_v2_54_per_task.csv`, "
-        f"all scored on {C.REFERENCE_GPU}). These are not the paper's printed table values.", "",
+        f"all scored on {C.REFERENCE_GPU}). These v2 checkpoints are the source of the paper's ICLR tables.", "",
         "| Raw-selected | Kind | Comparator |", "|---|---|---|",
     ]
     lines += [f"| `{r}` | {C.comparison_kind(r)} | {C.PAPER_LABEL[w]} (`{w}`) |"

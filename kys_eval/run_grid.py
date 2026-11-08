@@ -9,7 +9,9 @@ order, so `--list` with the same filters shows the indices a SLURM array should 
   python -m kys_eval.run_grid --index 7                   # one cell (for SLURM arrays)
 
 Results go to <results-root>/raw_selected/seed<S>/<setting>/ep<N>/{results.json,summary.md}.
-Cells with complete results are skipped, so re-running is safe. Exit status: 0 if every selected
+Cells with complete results for that cell's checkpoint (same HF repo, subfolder, setting, seed, epoch and
+step; plus the revision when --hf-revision is given) are skipped, so re-running is safe; complete results
+that belong to another checkpoint are re-evaluated (`--list` shows them as "stale"). Exit status: 0 if every selected
 cell is complete, 1 if any failed, 2 on bad arguments.
 """
 
@@ -20,7 +22,7 @@ from pathlib import Path
 from kys_eval import common
 from kys_eval import config as C
 from kys_eval.common import EvalError
-from kys_eval.eval_checkpoint import add_eval_flags, evaluate, is_complete
+from kys_eval.eval_checkpoint import add_eval_flags, evaluate, reusable
 
 
 def selected_cells(seeds, settings, epochs):
@@ -33,6 +35,10 @@ def cell_dir(results_root, cell):
 
 def cell_spec(cell, hf_repo, hf_revision):
     return f"hf://{hf_repo}/{cell['hf_subfolder']}" + (f"@{hf_revision}" if hf_revision else "")
+
+
+def cell_meta(cell, hf_repo):
+    return {k: cell[k] for k in ("setting", "seed", "epoch", "step", "hf_subfolder")} | {"hf_repo": hf_repo}
 
 
 def cell_label(cell):
@@ -58,15 +64,24 @@ def main(argv=None):
     parser.add_argument("--check-hub", action="store_true", help="with --list: show whether each checkpoint is on the hub")
     parser.add_argument("--index", type=int, help="evaluate only the cell at this index of the selected list")
     parser.add_argument("--stop-on-error", action="store_true", help="stop at the first failed cell")
+    parser.add_argument("--expect-cells", type=int, metavar="N",
+                        help="refuse (exit 2) unless the filters select exactly N cells; the SLURM array passes its size")
     add_eval_flags(parser)
     args = parser.parse_args(argv)
 
     cells = selected_cells(args.seeds, args.settings, args.epochs)
+    if args.expect_cells is not None and args.expect_cells != len(cells):
+        print(f"[kys] the filters select {len(cells)} cells but {args.expect_cells} were expected (SLURM --array "
+              f"range vs KYS_GRID_ARGS); refusing, because the indices would point at the wrong cells. "
+              f"Check with: python -m kys_eval.run_grid --list <same filters>", file=sys.stderr)
+        return 2
     if args.list:
         on_hub = hub_checkpoints(args.hf_repo, args.hf_revision) if args.check_hub else None
         print(f"{'idx':>3}  {'status':<8}  {'hub':<7}  cell")
         for i, cell in enumerate(cells):
-            status = "done" if is_complete(cell_dir(args.results_root, cell)) else "pending"
+            ok, stale = reusable(cell_dir(args.results_root, cell), cell_spec(cell, args.hf_repo, args.hf_revision),
+                                 cell_meta(cell, args.hf_repo))
+            status = "done" if ok is not None else ("stale" if stale else "pending")
             hub = "-" if on_hub is None else ("present" if cell["hf_subfolder"] in on_hub else "MISSING")
             print(f"{i:>3}  {status:<8}  {hub:<7}  {cell_label(cell):<45} {cell['hf_subfolder']}")
         print(f"{len(cells)} cells; SLURM: --array=0-{len(cells) - 1}")
@@ -85,7 +100,7 @@ def main(argv=None):
                 cell_spec(cell, args.hf_repo, args.hf_revision),
                 cell_dir(args.results_root, cell),
                 label=cell_label(cell),
-                cell={k: cell[k] for k in ("setting", "seed", "epoch", "step", "hf_subfolder")} | {"hf_repo": args.hf_repo},
+                cell=cell_meta(cell, args.hf_repo),
                 model_cache=args.model_cache,
                 allow_any_gpu=args.allow_any_gpu,
                 allow_env_mismatch=args.allow_env_mismatch,

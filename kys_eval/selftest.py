@@ -115,8 +115,48 @@ def test_reference_compare():
     print("ok  reference comparison (exact pass, hash/score/missing-task failures, tolerance pass)")
 
 
+def test_result_identity():
+    """E-F1: complete results are reused only for the checkpoint they belong to; E-F2: --expect-cells."""
+    from kys_eval import eval_checkpoint, run_grid
+
+    repo = C.HF_REPO
+    c0, c1 = selected_cells([42], C.RAW_SETTINGS, C.EPOCHS)[:2]
+    spec = lambda c, rev=None: run_grid.cell_spec(c, repo, rev)  # noqa: E731
+    meta = lambda c: run_grid.cell_meta(c, repo)  # noqa: E731
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "cell"
+        out.mkdir()
+        res = {"schema": common.RESULTS_SCHEMA, "complete": True, "cell": meta(c0),
+               "model": {"spec": spec(c0), **common.parse_model_spec(spec(c0)), "commit": "abc123def"}}
+        common.write_json(out / "results.json", res)
+        assert eval_checkpoint.reusable(out, spec(c0), meta(c0))[0] is not None
+        assert eval_checkpoint.reusable(out, spec(c0, "abc123"), meta(c0))[0] is not None  # commit prefix
+        _, why = eval_checkpoint.reusable(out, spec(c0, "fff000"), meta(c0))
+        assert why and "revision" in why[0], why
+        _, why = eval_checkpoint.reusable(out, spec(c1), meta(c1))  # another cell's results in this folder
+        assert any("model path" in w for w in why) and any("epoch" in w for w in why), why
+        wrong_step = dict(meta(c0), step=meta(c0)["step"] + 1)
+        _, why = eval_checkpoint.reusable(out, spec(c0), wrong_step)
+        assert why == [f"cell step is {c0['step']}, expected {c0['step'] + 1}"], why
+        res["model"] = {"spec": "/some/local/dir", "kind": "local", "path": "/some/local/dir"}
+        common.write_json(out / "results.json", res)
+        assert eval_checkpoint.reusable(out, "/some/local/dir")[0] is not None
+        assert eval_checkpoint.reusable(out, "/other/dir")[1]
+        assert eval_checkpoint.reusable(out, spec(c0), meta(c0))[1]
+        res["complete"] = False
+        common.write_json(out / "results.json", res)
+        assert eval_checkpoint.reusable(out, "/some/local/dir") == (None, [])
+        r = ["--results-root", tmp, "--settings", "raw_diversity_oriented", "raw_disagreement_aware",
+             "signal-disagreement-lambda0"]
+        assert run_grid.main(r + ["--expect-cells", "72", "--index", "0"]) == 2
+        assert run_grid.main(["--results-root", tmp, "--expect-cells", "27", "--index", "0"]) == 2
+        assert run_grid.main(r + ["--expect-cells", "27", "--list"]) == 0
+    print("ok  result identity check (E-F1) and array size check (E-F2)")
+
+
 def main():
     test_specs_and_grid()
+    test_result_identity()
     test_aggregation()
     test_reference_compare()
     print("selftest passed")

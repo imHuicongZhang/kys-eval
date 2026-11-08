@@ -9,7 +9,10 @@ LightEval output under <out-dir>/lighteval_raw/ and the LightEval log at <out-di
       --out-dir results/adhoc/raw_random_seed42_ep1
 
 --model is a local HF checkpoint directory or hf://<org>/<repo>[/<subfolder>][@<revision>].
-If <out-dir>/results.json is already complete the checkpoint is skipped (use --force to redo).
+If <out-dir>/results.json is already complete AND belongs to this checkpoint (same model path, and for grid
+cells the same setting, seed, epoch, step and HF subfolder) the checkpoint is skipped (use --force to redo).
+Complete results for a different checkpoint are reported and re-evaluated, never reused. A checkpoint
+re-uploaded to the same path and revision cannot be told apart this way: use --force for it.
 Exit status: 0 complete, 1 failed or incomplete.
 """
 
@@ -28,9 +31,54 @@ from kys_eval import config as C
 from kys_eval.common import EvalError
 
 
-def is_complete(out_dir):
+CELL_KEYS = ("setting", "seed", "epoch", "step", "hf_subfolder", "hf_repo")
+
+
+def _spec_identity(spec):
+    """(kind, model path, requested revision) of a --model spec; None if it cannot be parsed."""
+    try:
+        p = common.parse_model_spec(spec)
+    except Exception:  # noqa: BLE001 - an unparsable stored spec simply does not match
+        return None
+    if p["kind"] == "local":
+        return ("local", str(Path(p["path"]).expanduser().resolve()), None)
+    return ("hf", f"{p['repo_id']}/{p['subfolder']}".rstrip("/"), p.get("revision"))
+
+
+def identity_mismatch(results, model, cell=None):
+    """Reasons why existing results do not belong to `model` (and `cell`); [] if they do (audit E-F1).
+
+    Compared: the model path (local directory, or HF repo + subfolder); the revision, when `model` pins one
+    (it must equal the stored revision or prefix the stored resolved commit); and for grid cells the stored
+    cell's setting, seed, epoch, step, HF subfolder and HF repo."""
+    reasons = []
+    stored_model = results.get("model") or {}
+    want, have = _spec_identity(model), _spec_identity(stored_model.get("spec") or "")
+    if want is None or have is None:
+        reasons.append(f"model spec {stored_model.get('spec')!r} is not comparable with {model!r}")
+    else:
+        if want[:2] != have[:2]:
+            reasons.append(f"model path is {have[1]} ({have[0]}), expected {want[1]} ({want[0]})")
+        rev = want[2]
+        if rev and rev != stored_model.get("revision") and not str(stored_model.get("commit") or "").startswith(rev):
+            reasons.append(f"model revision is {stored_model.get('revision')!r} / commit {stored_model.get('commit')!r}, "
+                           f"expected {rev!r}")
+    if cell is not None:
+        stored_cell = results.get("cell") or {}
+        for k in CELL_KEYS:
+            if k in cell and stored_cell.get(k) != cell[k]:
+                reasons.append(f"cell {k} is {stored_cell.get(k)!r}, expected {cell[k]!r}")
+    return reasons
+
+
+def reusable(out_dir, model, cell=None):
+    """(results, reasons): results if complete results in out_dir belong to this checkpoint, else None.
+    reasons lists the identity mismatches of complete-but-foreign results ([] otherwise)."""
     results = common.load_results(Path(out_dir) / "results.json")
-    return bool(results and results.get("complete"))
+    if not (results and results.get("complete")):
+        return None, []
+    reasons = identity_mismatch(results, model, cell)
+    return (None, reasons) if reasons else (results, [])
 
 
 def run_lighteval(model_dir, raw_dir, log_path):
@@ -72,9 +120,14 @@ def evaluate(
     """Evaluate one checkpoint; return the results dict. Raises EvalError on failure."""
     out_dir = Path(out_dir)
     label = label or model
-    if not force and is_complete(out_dir):
-        print(f"[kys] SKIP {label}: complete results already in {out_dir}")
-        return common.load_results(out_dir / "results.json")
+    if not force:
+        existing, reasons = reusable(out_dir, model, cell)
+        if existing is not None:
+            print(f"[kys] SKIP {label}: complete results for this checkpoint already in {out_dir}")
+            return existing
+        if reasons:
+            print(f"[kys] RERUN {label}: the complete results in {out_dir} belong to another checkpoint "
+                  f"({'; '.join(reasons)}); re-evaluating and overwriting them")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     env = common.environment_info()

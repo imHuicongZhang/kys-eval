@@ -31,7 +31,7 @@ python -m kys_eval.reference_check --model /path/to/diversity-first-10B-1.5B-see
 # 2) score the grid: all 72 checkpoints in one job ...
 python -m kys_eval.run_grid --delete-weights
 #    ... or as a SLURM array (edit the placeholders first, see "SLURM")
-mkdir -p logs && sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch
+mkdir -p logs && sbatch --array=0-71%8 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS=all slurm/eval_grid_array.sbatch
 
 # 3) reports
 python -m kys_eval.aggregate                # -> reports/raw_selected_report.md, reports/raw_vs_rewritten.md
@@ -70,7 +70,7 @@ python -m kys_eval.eval_checkpoint \
 
 - `--model` is a local HF checkpoint directory (`config.json`, `*.safetensors`, tokenizer files) or `hf://<org>/<repo>[/<subfolder>][@<revision>]`. HF checkpoints are downloaded at the resolved commit into `model_cache/` (`--model-cache`, or `KYS_MODEL_CACHE`).
 - It runs `python -m lighteval accelerate "model_name=<dir>,dtype=bfloat16" <63 tasks> --custom-tasks kys_eval/tasks/kys_tasks.py` with `LIGHTEVAL_NO_CACHE=1` and `TOKENIZERS_PARALLELISM=false`.
-- It writes `results.json` and `summary.md` (see "Outputs") and skips the checkpoint if `results.json` is already complete. Use `--force` to redo it.
+- It writes `results.json` and `summary.md` (see "Outputs") and skips the checkpoint if `results.json` is already complete and belongs to the same checkpoint (model path; for grid cells also setting, seed, epoch, step and HF subfolder). Complete results of another checkpoint are re-evaluated and overwritten. A re-upload to the same path cannot be detected this way: use `--force` to redo it.
 - It refuses non-H100 GPUs unless you pass `--allow-any-gpu`. `--delete-weights` removes downloaded weights afterwards.
 - Exit status: 0 complete, 1 failed or incomplete.
 
@@ -85,7 +85,7 @@ python -m kys_eval.run_grid --index 5                 # one cell of the (filtere
 ```
 
 - Cells are ordered (seed, setting, epoch), giving indices 0–71 for the full grid. Filters keep that order, so `--list` with the same filters shows the indices an array job should use.
-- Complete cells are skipped, and a failed cell does not stop the others (use `--stop-on-error` to change that).
+- Complete cells whose results belong to that cell's checkpoint are skipped (`--list` shows foreign results as `stale`, and they are re-run), and a failed cell does not stop the others (use `--stop-on-error` to change that).
 - Flags passed through to every cell: `--delete-weights`, `--force`, `--allow-any-gpu`, `--model-cache`, `--hf-revision`, `--results-root` (default `results/`, or `KYS_RESULTS_ROOT`).
 - Exit status is 0 only if every selected cell is complete.
 
@@ -103,12 +103,15 @@ python -m kys_eval.run_grid --index 5                 # one cell of the (filtere
 ```bash
 mkdir -p logs
 python -m kys_eval.prefetch                                                            # once, before any array
-sbatch --export=ALL,KYS_EVAL_ROOT=$PWD slurm/eval_grid_array.sbatch                    # 72 tasks (0-71)
+R="--settings raw_diversity_oriented raw_disagreement_aware signal-disagreement-lambda0"
+sbatch --array=0-26%8 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="$R" slurm/eval_grid_array.sbatch   # rebuttal set, 27 tasks
+sbatch --array=0-71%8 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS=all slurm/eval_grid_array.sbatch    # 72 tasks (0-71)
 sbatch --array=0-23 --export=ALL,KYS_EVAL_ROOT=$PWD,KYS_GRID_ARGS="--seeds 44" slurm/eval_grid_array.sbatch
 ```
 
 - The script activates `${KYS_VENV:-$KYS_EVAL_ROOT/.venv}`, sets `HF_HOME=${HF_HOME:-$KYS_EVAL_ROOT/hf_cache}`, and runs `run_grid --index $SLURM_ARRAY_TASK_ID --delete-weights $KYS_GRID_ARGS`.
-- The `--array` range must equal the index range from `run_grid --list $KYS_GRID_ARGS`.
+- `KYS_GRID_ARGS` is required (`all` = the full grid); without it every task exits 2.
+- The `--array` range must be exactly `0..N-1` for the N cells of `run_grid --list $KYS_GRID_ARGS`; each task checks this (`run_grid --expect-cells`) and exits 2 otherwise. To re-run single indices (e.g. `--array=7,12`), also export `KYS_ARRAY_PARTIAL=1`.
 - Resubmitting is safe, because finished cells exit immediately.
 - `slurm/reference_check.sbatch` runs the reference check. It needs `KYS_REFERENCE_MODEL=<dir or hf:// spec>`.
 
