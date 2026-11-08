@@ -54,10 +54,7 @@ python -m kys_eval.aggregate                # -> reports/raw_selected_report.md,
 
 It also prints the visible GPU. `eval_checkpoint`, `run_grid` and `reference_check` refuse to run if these checks fail, unless you pass `--allow-env-mismatch`.
 
-The raw-selected HF repo `blab-jhu/KYS-1.5B-Raw-Selected-Baselines` is **gated**: downloading its checkpoints
-needs `huggingface-cli login` (or `HF_TOKEN` in the environment) with an account that has accepted its access
-conditions, on every node that scores; uploading to it needs a token with write access to `blab-jhu`. The reference
-checkpoint repo `wytro/KYS-1.5B-Rewritten-v2` is public. Never write a token into this repository.
+`blab-jhu/KYS-1.5B-Raw-Selected-Baselines` is gated: the collaborator needs a Hugging Face token with write access to `blab-jhu`, kept in the environment (`HF_TOKEN` or `huggingface-cli login`) on every node that uploads or scores, never in a file. `wytro/Know-Your-Sources-init` is public with gating disabled (verified 2026-11-08 by an anonymous download); it needs no token. The reference checkpoint repo `wytro/KYS-1.5B-Rewritten-v2` is public.
 
 ## Commands
 
